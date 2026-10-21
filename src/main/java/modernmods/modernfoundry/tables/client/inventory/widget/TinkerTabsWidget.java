@@ -1,8 +1,11 @@
 package modernmods.modernfoundry.tables.client.inventory.widget;
 
 import com.google.common.collect.Lists;
+import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.systems.RenderSystem;
+import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.MouseHandler;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Renderable;
 import net.minecraft.client.gui.components.events.GuiEventListener;
@@ -20,6 +23,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import org.apache.commons.lang3.tuple.Pair;
+import org.lwjgl.glfw.GLFW;
 import modernmods.hilt.client.screen.ElementScreen;
 import modernmods.hilt.client.screen.TabsWidget;
 import modernmods.modernfoundry.TConstruct;
@@ -37,6 +41,12 @@ public class TinkerTabsWidget implements Renderable, GuiEventListener, Narratabl
   protected static final ElementScreen ACTIVE_TAB_L_ELEMENT = new ElementScreen(TAB_IMAGE, 26, 18, 26, 30, 256, 256);
   protected static final ElementScreen ACTIVE_TAB_C_ELEMENT = new ElementScreen(TAB_IMAGE, 52, 18, 26, 30, 256, 256);
   protected static final ElementScreen ACTIVE_TAB_R_ELEMENT = new ElementScreen(TAB_IMAGE, 78, 18, 26, 30, 256, 256);
+
+  /** How long a saved cursor position stays valid, in case the server never opens the new tab */
+  private static final long CURSOR_RESTORE_TIMEOUT_MS = 2000;
+  private static double savedCursorX;
+  private static double savedCursorY;
+  private static long cursorSavedAt = -1;
 
   private final int leftPos;
   private final int topPos;
@@ -102,11 +112,33 @@ public class TinkerTabsWidget implements Renderable, GuiEventListener, Narratabl
     if (level != null) {
       BlockState state = level.getBlockState(pos);
       if (state.getBlock() instanceof ITabbedBlock) {
+        MouseHandler mouse = this.parent.getMinecraft().mouseHandler;
+        savedCursorX = mouse.xpos();
+        savedCursorY = mouse.ypos();
+        cursorSavedAt = Util.getMillis();
         TinkerNetwork.getInstance().sendToServer(new StationTabPacket(pos));
 
         // sound!
         this.parent.getMinecraft().getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0F));
       }
+    }
+  }
+
+  /**
+   * Switching tabs reopens the menu on the server, which closes the old screen first; the client grabs and then
+   * releases the mouse in between, recentering the cursor. Puts it back where the tab was clicked.
+   */
+  public static void restoreCursorAfterTabSwitch(Minecraft minecraft) {
+    if (cursorSavedAt < 0) {
+      return;
+    }
+    boolean recent = Util.getMillis() - cursorSavedAt <= CURSOR_RESTORE_TIMEOUT_MS;
+    cursorSavedAt = -1;
+    if (recent && !minecraft.mouseHandler.isMouseGrabbed()) {
+      MouseHandler mouse = minecraft.mouseHandler;
+      mouse.xpos = savedCursorX;
+      mouse.ypos = savedCursorY;
+      InputConstants.grabOrReleaseMouse(minecraft.getWindow().getWindow(), GLFW.GLFW_CURSOR_NORMAL, savedCursorX, savedCursorY);
     }
   }
 
